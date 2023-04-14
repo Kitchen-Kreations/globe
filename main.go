@@ -5,141 +5,100 @@ import (
 	"log"
 	"net"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/akamensky/argparse"
+	"github.com/fatih/color"
 )
 
-func scanner(ip string, portsToScanChan chan int, results chan int) {
-	for p := range portsToScanChan {
-		address := fmt.Sprintf("%s:%d", ip, p)
-		conn, err := net.Dial("tcp", address)
-		if err != nil {
-			results <- 0
-			continue
-		}
-		conn.Close()
-		results <- p
-	}
-}
+var (
+	banner string = ` 
+	 ██████╗ ██╗      ██████╗ ██████╗ ███████╗
+	██╔════╝ ██║     ██╔═══██╗██╔══██╗██╔════╝
+	██║  ███╗██║     ██║   ██║██████╔╝█████╗  
+	██║   ██║██║     ██║   ██║██╔══██╗██╔══╝  
+	╚██████╔╝███████╗╚██████╔╝██████╔╝███████╗
+	 ╚═════╝ ╚══════╝ ╚═════╝ ╚═════╝ ╚══════╝
+	`
+)
 
 func main() {
-	startTime := time.Now()
+	parser := argparse.NewParser("globe", "Port Scanner")
 
-	// init parser
-	parser := argparse.NewParser("globe", "port scanner")
-
-	// arguments
-	var ip *string = parser.String("i", "ip", &argparse.Options{Required: true, Help: "What address to scan"})
-	var ports *string = parser.String("p", "ports", &argparse.Options{Required: false, Help: "What ports to scan"})
+	var port *string = parser.String("p", "port", &argparse.Options{Required: false, Help: "Ports to scan"})
+	var target *string = parser.String("t", "target", &argparse.Options{Required: true, Help: "IP/Domain to target"})
 
 	err := parser.Parse(os.Args)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	var portsToScan []int
+	ports_to_scan := get_ports(*port)
+	target_ip := conv_domain_to_ip(*target).String()
+	print_start_banner(*target, ports_to_scan, target_ip)
 
-	if *ports == "" {
-		var defaultPorts []int
-		for i := 0; i <= 1000; i++ {
-			defaultPorts = append(defaultPorts, i)
+}
+
+func conv_domain_to_ip(target string) net.IP {
+	ips, _ := net.LookupIP(target)
+	return ips[0]
+}
+
+func get_ports(port string) []int {
+	if port == "" {
+		return makeRange(1, 1000)
+	} else if strings.Contains(port, "-") {
+		min_max := strings.Split(port, "-")
+		min, err := strconv.Atoi(min_max[0])
+		if err != nil {
+			log.Fatal(err)
+		}
+		max, err := strconv.Atoi(min_max[1])
+		if err != nil {
+			log.Fatal(err)
 		}
 
-		portsToScan = defaultPorts
-	} else if *ports == "a" || *ports == "all" {
-		var allPorts []int
-		for i := 0; i <= 65535; i++ {
-			allPorts = append(allPorts, i)
+		if max < min {
+			log.Fatal("Lower bound must be less than upper bound")
 		}
 
-		portsToScan = allPorts
-	} else {
-		// parse through ports
-
-		if strings.Contains(*ports, ",") {
-			portsToScanString := strings.Split(*ports, ",")
-
-			for _, i := range portsToScanString {
-				port, err := strconv.Atoi(i)
-				if err != nil {
-					log.Fatal(err)
-				}
-
-				portsToScan = append(portsToScan, port)
-			}
-		} else if strings.Contains(*ports, "-") {
-			portRangeString := strings.Split(*ports, "-")
-			var portRange []int
-
-			for _, i := range portRangeString {
-				port, err := strconv.Atoi(i)
-				if err != nil {
-					log.Fatal(err)
-				}
-
-				portRange = append(portRange, port)
-			}
-
-			for i := portRange[0]; i <= portRange[1]; i++ {
-				portsToScan = append(portsToScan, i)
-			}
-		} else {
-			port, err := strconv.Atoi(*ports)
+		return makeRange(min, max)
+	} else if strings.Contains(port, ",") {
+		split_port := strings.Split(port, ",")
+		var ports []int
+		for _, port := range split_port {
+			port, err := strconv.Atoi(port)
 			if err != nil {
 				log.Fatal(err)
 			}
-
-			portsToScan = append(portsToScan, port)
+			ports = append(ports, port)
 		}
+		return ports
 	}
 
-	target := *ip
+	return makeRange(1, 1000)
+}
 
-	fmt.Println("Target: ", target)
-	fmt.Println("Start Time: ", startTime.String())
-
-	var wg = &sync.WaitGroup{}
-
-	portsToScanChan := make(chan int, 500)
-	results := make(chan int)
-	var openPorts []int
-
-	for i := 0; i <= cap(portsToScanChan); i++ {
-		go scanner(target, portsToScanChan, results)
+func makeRange(min, max int) []int {
+	a := make([]int, max-min+1)
+	for i := range a {
+		a[i] = min + i
 	}
+	return a
+}
 
-	go func() {
-		for _, element := range portsToScan {
-			portsToScanChan <- element
-		}
-	}()
+func print_start_banner(target string, port []int, target_ip string) {
+	blue := color.New(color.FgCyan)
 
-	for i := range portsToScan {
-		wg.Add(1)
-		i++
-		go func(port int) {
-			if port != 0 {
-				openPorts = append(openPorts, port)
-			}
-		}(<-results)
-	}
+	blue.Println(banner)
+	fmt.Println("Created By: BlessedToastr")
+	fmt.Println("github.com/Kitchen-Kreations/globe")
+	fmt.Println("")
 
-	close(portsToScanChan)
-	close(results)
+	fmt.Println("Scanning " + fmt.Sprint(len(port)) + " ports on " + target + "("+target_ip+")")
+}
 
-	fmt.Printf("\n PORT \t STATE \n======\t=======\n")
-	sort.Ints(openPorts)
-	for _, port := range openPorts {
-		fmt.Printf(" %d \t open \n", port)
-	}
-	fmt.Print("\n")
-	endTime := time.Now()
-	fmt.Println("End Time: " + endTime.String())
-	timeDiff := endTime.Sub(startTime)
-	fmt.Println("Globe took " + timeDiff.String() + " to run")
+func scanner_worker() {
+	
 }
